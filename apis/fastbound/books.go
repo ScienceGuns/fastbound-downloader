@@ -54,6 +54,13 @@ func DownloadBoundBook(apiBase string, config fbdownloader_settings.FBDConfig) (
 		}
 	}()
 
+	// Fastbound returns a 204 when the account is valid but no book PDF has been generated yet
+	if postResponse.StatusCode == http.StatusNoContent {
+		log.Printf("Fastbound has not generated a bound book for account %s yet. Trying again next cycle.",
+			config.Fastbound.AccountNumber)
+		return "", nil // This is not an error so nothing is returned
+	}
+
 	// Read the response status code and fail out with any errors
 	if postResponse.StatusCode != http.StatusOK {
 		errorBody, _ := io.ReadAll(postResponse.Body)

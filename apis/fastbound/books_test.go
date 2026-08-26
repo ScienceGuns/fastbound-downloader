@@ -178,3 +178,70 @@ func TestDownloadBoundBook_FileExists(t *testing.T) {
 		t.Errorf("Expected file content to be unchanged, but it was modified")
 	}
 }
+
+// TestDownloadBoundBook_NotReady validates that DownloadBoundBook handles a book Fastbound has not generated yet
+func TestDownloadBoundBook_NotReady(t *testing.T) {
+	// Create a mock server to simulate the Fastbound API
+	getCallCount := 0 // Count of times the download is attempted
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Create a mock API POST request that reports the book is not ready yet
+		if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/Downloads/BoundBook") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		// Any download attempt at all means the logic to skip this has failed
+		if r.Method == "GET" && r.URL.Path == "/download/MOCK_BOUND_BOOK.pdf" {
+			getCallCount++ // Track if this handler is called
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		// Return a 404 if the request doesn't match any of the above
+		t.Errorf("Mock server received unexpected request: %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	defer mockServer.Close()
+
+	tempDir := t.TempDir()
+	// Create a test config for use with function calls
+	testConfig := fbdownloader_settings.FBDConfig{
+		Fastbound: struct {
+			AccountNumber string `json:"account-number"`
+			ApiKey        string `json:"api-key"`
+			AuditUser     string `json:"audit-user"`
+		}{
+			AccountNumber: "123456",
+			ApiKey:        "kkJ4K3dHoHqZzNvoDJ",
+			AuditUser:     "pgibbons@initech.com",
+		},
+		Paths: struct {
+			BoundBooks string `json:"bound-books"`
+		}{
+			BoundBooks: tempDir,
+		},
+	}
+
+	// Call the DownloadBoundBook function using our mockServer URL instead of the real API
+	savedFilePath, err := DownloadBoundBook(mockServer.URL, testConfig)
+	if err != nil {
+		t.Fatalf("DownloadBoundBook() returned an unexpected error: %v", err)
+	}
+
+	// Check that the returned path is blank as Fastbound had nothing to provide
+	if savedFilePath != "" {
+		t.Errorf("Expected saved file path to be blank, but got '%s'", savedFilePath)
+	}
+
+	// Check that the download from the server was not called
+	if getCallCount > 0 {
+		t.Errorf("Expected GET request to be skipped, but it was called %d time(s)", getCallCount)
+	}
+
+	// Check that a 204 did not leave a file behind in the download path
+	leftoverFiles, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to read back the download directory: %v", err)
+	}
+	if len(leftoverFiles) != 0 {
+		t.Errorf("Expected no files to be created, but found %d", len(leftoverFiles))
+	}
+}

@@ -19,10 +19,10 @@ var (
 		Help: "The total number of successful bound book downloads",
 	})
 
-	// SkippedBookDownloadsTotal counts the total number of bound books downloads that were skipped due to an existing file
+	// SkippedBookDownloadsTotal counts the total number of bound book downloads that were skipped because there was nothing new to fetch
 	SkippedBookDownloadsTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "fastbound_downloader_skipped_book_downloads_total",
-		Help: "The total number of times the found book was already detected as downloaded",
+		Help: "The total number of times the book was already downloaded or Fastbound had not generated one yet",
 	})
 
 	// FailedBookDownloadsTotal counts the total number of failed bound book downloads
