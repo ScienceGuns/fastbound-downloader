@@ -245,3 +245,74 @@ func TestDownloadBoundBook_NotReady(t *testing.T) {
 		t.Errorf("Expected no files to be created, but found %d", len(leftoverFiles))
 	}
 }
+
+// TestDownloadBoundBook_UserAgent validates that DownloadBoundBook identifies itself on every request it makes
+func TestDownloadBoundBook_UserAgent(t *testing.T) {
+	// Track the User-Agent each handler was called with
+	seenUserAgents := make(map[string]string)
+	// Create a mock server to simulate the Fastbound API
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Create a mock API POST request and response
+		if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/Downloads/BoundBook") {
+			seenUserAgents["POST"] = r.Header.Get("User-Agent")
+			// Force overriding the returned URL
+			responseURL := "http://" + r.Host + "/download/MOCK_BOUND_BOOK.pdf"
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			// Return what would be a valid result for the API
+			_, err := fmt.Fprintf(w, `{"url": "%s"}`, responseURL)
+			if err != nil {
+				t.Fatalf("Mock server failed to write response: %v", err)
+			}
+			return
+		}
+		// Request the download of the mocked bound book
+		if r.Method == "GET" && r.URL.Path == "/download/MOCK_BOUND_BOOK.pdf" {
+			seenUserAgents["GET"] = r.Header.Get("User-Agent")
+			w.WriteHeader(http.StatusOK)
+			// We're writing some dummy data here
+			_, err := w.Write([]byte(`"Guns. Lots of guns."`))
+			if err != nil {
+				t.Fatalf("Mock server failed to write file content: %v", err)
+			}
+			return
+		}
+		// Return a 404 if the request doesn't match any of the above
+		t.Errorf("Mock server received unexpected request: %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	defer mockServer.Close()
+
+	tempDir := t.TempDir()
+	// Create a test config for use with function calls
+	testConfig := fbdownloader_settings.FBDConfig{
+		Fastbound: struct {
+			AccountNumber string `json:"account-number"`
+			ApiKey        string `json:"api-key"`
+			AuditUser     string `json:"audit-user"`
+		}{
+			AccountNumber: "123456",
+			ApiKey:        "kkJ4K3dHoHqZzNvoDJ",
+			AuditUser:     "pgibbons@initech.com",
+		},
+		Paths: struct {
+			BoundBooks string `json:"bound-books"`
+		}{
+			BoundBooks: tempDir,
+		},
+	}
+
+	// Call the DownloadBoundBook function using our mockServer URL instead of the real API
+	_, err := DownloadBoundBook(mockServer.URL, testConfig)
+	if err != nil {
+		t.Fatalf("DownloadBoundBook() returned an unexpected error: %v", err)
+	}
+
+	// Both requests should name this tool rather than leaving Go's default agent in place
+	for _, request := range []string{"POST", "GET"} {
+		if seenUserAgents[request] != userAgent {
+			t.Errorf("Expected the %s request User-Agent to be '%s', but got '%s'",
+				request, userAgent, seenUserAgents[request])
+		}
+	}
+}

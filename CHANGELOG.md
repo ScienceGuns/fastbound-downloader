@@ -6,6 +6,7 @@ Version 0.2.0
 -------------
 
 1. Handle bound book not ready yet responses (HTTP 204)
+2. Fastbound Downloader now identifies itself with a User-Agent of `fastbound-downloader`
 
 Version 0.1.0
 -------------

@@ -41,6 +41,7 @@ func DownloadBoundBook(apiBase string, config fbdownloader_settings.FBDConfig) (
 
 	postRequest.SetBasicAuth(config.Fastbound.ApiKey, config.Fastbound.ApiKey)
 	postRequest.Header.Set("accept", "application/json")
+	postRequest.Header.Set("User-Agent", userAgent)
 	postRequest.Header.Set("X-AuditUser", config.Fastbound.AuditUser)
 
 	// Execute the request using a default HTTP client.
@@ -98,6 +99,7 @@ func DownloadBoundBook(apiBase string, config fbdownloader_settings.FBDConfig) (
 	if err != nil {
 		return "", fmt.Errorf("failed to create GET request for download: %w", err)
 	}
+	downloadRequest.Header.Set("User-Agent", userAgent)
 	downloadResponse, err := client.Do(downloadRequest)
 	if err != nil {
 		return "", fmt.Errorf("failed to download file from URL: %w", err)
