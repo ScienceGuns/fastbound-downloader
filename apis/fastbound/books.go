@@ -113,7 +113,9 @@ func DownloadBoundBook(apiBase string, config fbdownloader_settings.FBDConfig) (
 	if downloadResponse.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("file download failed with status %d", downloadResponse.StatusCode)
 	}
-	storeFile, err := os.Create(destinationPath)
+	// Initially download a partial file so an interrupted download is not seen as a success
+	partialPath := destinationPath + ".partial"
+	storeFile, err := os.Create(partialPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to save bound book file: %w", err)
 	}
@@ -126,6 +128,11 @@ func DownloadBoundBook(apiBase string, config fbdownloader_settings.FBDConfig) (
 	// Stream the file contents to the new file
 	if _, err := io.Copy(storeFile, downloadResponse.Body); err != nil {
 		return "", fmt.Errorf("failed to write the bound book file: %w", err)
+	}
+
+	// The whole file has downloaded and can be given a permanent filename now
+	if err := os.Rename(partialPath, destinationPath); err != nil {
+		return "", fmt.Errorf("failed to rename the bound book file: %w", err)
 	}
 
 	return destinationPath, nil

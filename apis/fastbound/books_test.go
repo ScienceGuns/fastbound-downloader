@@ -223,7 +223,7 @@ func TestDownloadBoundBook_NotReady(t *testing.T) {
 	// Call the DownloadBoundBook function using our mockServer URL instead of the real API
 	savedFilePath, err := DownloadBoundBook(mockServer.URL, testConfig)
 	if err != nil {
-		t.Fatalf("DownloadBoundBook() returned an unexpected error: %v", err)
+		t.Fatalf("An unexpected error was returned: %v", err)
 	}
 
 	// Check that the returned path is blank as Fastbound had nothing to provide
@@ -305,7 +305,7 @@ func TestDownloadBoundBook_UserAgent(t *testing.T) {
 	// Call the DownloadBoundBook function using our mockServer URL instead of the real API
 	_, err := DownloadBoundBook(mockServer.URL, testConfig)
 	if err != nil {
-		t.Fatalf("DownloadBoundBook() returned an unexpected error: %v", err)
+		t.Fatalf("An unexpected error was returned: %v", err)
 	}
 
 	// Both requests should name this tool rather than leaving Go's default agent in place
@@ -314,5 +314,110 @@ func TestDownloadBoundBook_UserAgent(t *testing.T) {
 			t.Errorf("Expected the %s request User-Agent to be '%s', but got '%s'",
 				request, userAgent, seenUserAgents[request])
 		}
+	}
+}
+
+// TestDownloadBoundBook_TruncatedDownload validates that an interrupted download never gets marked as a success
+func TestDownloadBoundBook_TruncatedDownload(t *testing.T) {
+	// Create a mock server that hangs up on the first download and behaves on the second
+	getCallCount := 0 // Count of times the download is attempted
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Create a mock API POST request and response
+		if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/Downloads/BoundBook") {
+			// Force overriding the returned URL
+			responseURL := "http://" + r.Host + "/download/MOCK_BOUND_BOOK.pdf"
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			// Return what would be a valid result for the API
+			_, err := fmt.Fprintf(w, `{"url": "%s"}`, responseURL)
+			if err != nil {
+				t.Fatalf("Mock server failed to write response: %v", err)
+			}
+			return
+		}
+		// Request the download of the mocked bound book
+		if r.Method == "GET" && r.URL.Path == "/download/MOCK_BOUND_BOOK.pdf" {
+			getCallCount++ // Track which attempt we are serving
+			// Offer a completed file but hang up part way through
+			if getCallCount == 1 {
+				w.Header().Set("Content-Length", "1000")
+				w.WriteHeader(http.StatusOK)
+				_, err := w.Write([]byte(`"Guns. Lo`))
+				if err != nil {
+					t.Fatalf("Mock server failed to write file content: %v", err)
+				}
+				w.(http.Flusher).Flush()
+				panic(http.ErrAbortHandler)
+			}
+			w.WriteHeader(http.StatusOK)
+			// We're writing some dummy data here
+			_, err := w.Write([]byte(`"Guns. Lots of guns."`))
+			if err != nil {
+				t.Fatalf("Mock server failed to write file content: %v", err)
+			}
+			return
+		}
+		// Return a 404 if the request doesn't match any of the above
+		t.Errorf("Mock server received unexpected request: %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	defer mockServer.Close()
+
+	tempDir := t.TempDir()
+	// Create a test config for use with function calls
+	testConfig := fbdownloader_settings.FBDConfig{
+		Fastbound: struct {
+			AccountNumber string `json:"account-number"`
+			ApiKey        string `json:"api-key"`
+			AuditUser     string `json:"audit-user"`
+		}{
+			AccountNumber: "123456",
+			ApiKey:        "kkJ4K3dHoHqZzNvoDJ",
+			AuditUser:     "pgibbons@initech.com",
+		},
+		Paths: struct {
+			BoundBooks string `json:"bound-books"`
+		}{
+			BoundBooks: tempDir,
+		},
+	}
+	expectedFile := filepath.Join(tempDir, "MOCK_BOUND_BOOK.pdf")
+
+	// The first download is cut short, so it should fail instead of leaving a book behind
+	_, err := DownloadBoundBook(mockServer.URL, testConfig)
+	if err == nil {
+		t.Fatalf("Expected the download to fail on a truncated download, but it did not")
+	}
+	if _, err := os.Stat(expectedFile); err == nil {
+		t.Errorf("Expected no bound book to be saved, but found %s", expectedFile)
+	}
+
+	// The next download should have no trouble downloading the book it missed
+	savedFilePath, err := DownloadBoundBook(mockServer.URL, testConfig)
+	if err != nil {
+		t.Fatalf("An unexpected error was returned: %v", err)
+	}
+
+	// Check that the returned path is correct
+	if savedFilePath != expectedFile {
+		t.Errorf("Expected saved file path to be '%s', but got '%s'", expectedFile, savedFilePath)
+	}
+
+	// Check that the whole book was downloaded and not the half of it sent the first time
+	savedContent, err := os.ReadFile(expectedFile)
+	if err != nil {
+		t.Fatalf("Failed to read back file content: %v", err)
+	}
+	if string(savedContent) != `"Guns. Lots of guns."` {
+		t.Errorf("Expected the whole book to be saved, but got '%s'", string(savedContent))
+	}
+
+	// Check that the partial file was not preserved
+	leftoverFiles, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to read back the download directory: %v", err)
+	}
+	if len(leftoverFiles) != 1 {
+		t.Errorf("Expected only the bound book to be left behind, but found %d files", len(leftoverFiles))
 	}
 }
