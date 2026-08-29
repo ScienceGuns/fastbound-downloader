@@ -41,6 +41,7 @@ func DownloadBoundBook(apiBase string, config fbdownloader_settings.FBDConfig) (
 
 	postRequest.SetBasicAuth(config.Fastbound.ApiKey, config.Fastbound.ApiKey)
 	postRequest.Header.Set("accept", "application/json")
+	postRequest.Header.Set("User-Agent", userAgent)
 	postRequest.Header.Set("X-AuditUser", config.Fastbound.AuditUser)
 
 	// Execute the request using a default HTTP client.
@@ -53,6 +54,13 @@ func DownloadBoundBook(apiBase string, config fbdownloader_settings.FBDConfig) (
 			log.Printf("Warning: failed to close postResponse body: %v", err)
 		}
 	}()
+
+	// Fastbound returns a 204 when the account is valid but no book PDF has been generated yet
+	if postResponse.StatusCode == http.StatusNoContent {
+		log.Printf("Fastbound has not generated a bound book for account %s yet. Trying again next cycle.",
+			config.Fastbound.AccountNumber)
+		return "", nil // This is not an error so nothing is returned
+	}
 
 	// Read the response status code and fail out with any errors
 	if postResponse.StatusCode != http.StatusOK {
@@ -91,6 +99,7 @@ func DownloadBoundBook(apiBase string, config fbdownloader_settings.FBDConfig) (
 	if err != nil {
 		return "", fmt.Errorf("failed to create GET request for download: %w", err)
 	}
+	downloadRequest.Header.Set("User-Agent", userAgent)
 	downloadResponse, err := client.Do(downloadRequest)
 	if err != nil {
 		return "", fmt.Errorf("failed to download file from URL: %w", err)
@@ -104,7 +113,9 @@ func DownloadBoundBook(apiBase string, config fbdownloader_settings.FBDConfig) (
 	if downloadResponse.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("file download failed with status %d", downloadResponse.StatusCode)
 	}
-	storeFile, err := os.Create(destinationPath)
+	// Initially download a partial file so an interrupted download is not seen as a success
+	partialPath := destinationPath + ".partial"
+	storeFile, err := os.Create(partialPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to save bound book file: %w", err)
 	}
@@ -117,6 +128,11 @@ func DownloadBoundBook(apiBase string, config fbdownloader_settings.FBDConfig) (
 	// Stream the file contents to the new file
 	if _, err := io.Copy(storeFile, downloadResponse.Body); err != nil {
 		return "", fmt.Errorf("failed to write the bound book file: %w", err)
+	}
+
+	// The whole file has downloaded and can be given a permanent filename now
+	if err := os.Rename(partialPath, destinationPath); err != nil {
+		return "", fmt.Errorf("failed to rename the bound book file: %w", err)
 	}
 
 	return destinationPath, nil

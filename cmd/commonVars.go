@@ -11,7 +11,7 @@ import (
 )
 
 // The version string should be updated before any merge to main
-var shortVersion = "0.1.0"
+var shortVersion = "0.2.0"
 var projectMaintainer = "Mad Scientist Research LLC"
 var projectLicense = "MIT"
 var functionHelpShort = "An automated way to keep compliant Fastbound A&D book downloads"
